@@ -13,4 +13,4 @@ Execute the following command in the terminal
 ### 4 mkdir build & cd build
 ### 5 cmake .. -DCMAKE_BUILD_TYPE=Debug (or cmake .. -DCMAKE_BUILD_TYPE=Release)
 ### 6 make -j8
-### 5 ./a.out
+### 7 ./a.out
