@@ -1,24 +1,43 @@
 #include "AppThread.h"
-#include "LBPMR.h"
+#include "TFDR.h"
 #include "Feature.h"
-
+#include "LBPVariants.h"
 #include "numeric"
 
+
+std::atomic_uint8_t appAllThreadEndFlag;
 SpinLock appThreadLock;
-extern atomic_uint8_t appAllThreadEndFlag;
 
-
-void lbpmrPreTrainThread(uint8_t threadNum, uint8_t threadIndex,
-						LBPMR* lbpmr,
-						const Data& imgs)
+void dpPreTrainThread(uint8_t threadNum, uint8_t threadIndex, \
+						Operator* op, \
+						const Data& imgs,\
+						uint32_t*& histogram)
 {
+	int PN = op->getPN();
+	appThreadLock.lock();
+	if(histogram == nullptr){
+		histogram = new uint32_t[PN]{0};
+	}
+	appThreadLock.unlock();
 	for (size_t i = 0, index = threadIndex; index < imgs.size(); ++i, index = i * threadNum + threadIndex){
 		for (size_t j = 0; j < imgs[index].size(); j++){
-			lbpmr->countHistogram(imgs[index][j]);
+			Mat tmp;
+			op->process(imgs[index][j], tmp);
+
+			for (size_t i = 0; i < tmp.rows; i++){
+				int* pRow = tmp.ptr<int>(i);
+				for (size_t j = 0; j < tmp.cols; j++){
+					appThreadLock.lock();
+					histogram[pRow[j]]++;
+					appThreadLock.unlock();
+				}
+			}
 		}
 	}
 	appAllThreadEndFlag++;
 }
+
+
 void appThread1(uint8_t threadNum, uint8_t threadIndex,
 			   vector<Operator*> op1, Operator* op2,
 			   const Data& imgs, Mat& features)
@@ -74,6 +93,24 @@ void appThread1(uint8_t threadNum, uint8_t threadIndex,
 			matNormalize(feature);
 			Mat temp = features.row(j + indexBias[index]);
 			feature.copyTo(temp);
+		}
+	}
+	appAllThreadEndFlag++;
+}
+
+void appThread2(uint8_t threadNum, uint8_t threadIndex,
+			   Operator* op,
+			   const Data& imgs, Mat &dst)
+{
+	vector<uint32_t> indexBias(imgs.size(), 0);
+	for (size_t i = 1; i < imgs.size(); i++){
+		indexBias[i] = indexBias[i - 1] + imgs[i - 1].size();
+	}
+	for (size_t i = 0, index = threadIndex; index < imgs.size(); ++i, index = i * threadNum + threadIndex)
+	{
+		for (size_t j = 0; j < imgs[index].size(); j++)
+		{
+			op->process(imgs[index][j], dst);
 		}
 	}
 	appAllThreadEndFlag++;

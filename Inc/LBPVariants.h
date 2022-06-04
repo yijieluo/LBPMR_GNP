@@ -1,8 +1,30 @@
 #ifndef LBPVARIANTS_H
 #define LBPVARIANTS_H
 
-#include "Operator.h"
+
+
+#include <iostream>
+#include <vector>
+#include <opencv2/opencv.hpp>
 #include "math.h"
+#include <atomic>
+
+using namespace cv;
+using namespace std;
+
+typedef vector<vector<Mat>> Data;
+
+class TFDR;
+
+class Operator{
+protected:
+	TFDR* table = nullptr;
+public:
+	Operator(TFDR* table_): table(table_){}
+	virtual ~Operator(){}
+	virtual void process(const Mat& src, Mat& dst) = 0;
+	virtual int getPN() const = 0;//get Pattern Number
+};
 
 enum LOCAL_SAMPLE_SHAPE
 {
@@ -14,25 +36,9 @@ enum LOCAL_SAMPLE_RP
 	R1P8 = 1, R2P8 = 2, R3P8 = 3, R4P8 = 4, R5P8 = 5, R6P8 = 6, R7P8 = 7, R8P8 = 8, R9P8 = 9, 
 	R2P16 = 12, R3P24 = 23, R4P24 = 24, R5P24 = 25, R6P24 = 26, R7P24 = 27, R8P24 = 28, R9P24 = 29,
 };
-inline double biLinearInterpolation(const Mat &src, const Point2d &dst)
-{
-    Rect rect(floor(dst.x), floor(dst.y), 1, 1);
 
-    // uint8_t lt = src.at<uint8_t>(rect.y, rect.x),
-    //         rt = src.at<uint8_t>(rect.y, rect.x + 1),
-    //         lb = src.at<uint8_t>(rect.y + 1, rect.x),
-    //         rb = src.at<uint8_t>(rect.y + 1, rect.x + 1);
-    uint8_t lt = src.ptr<uint8_t>(rect.y)[rect.x],
-            rt = src.ptr<uint8_t>(rect.y)[rect.x + 1],
-            lb = src.ptr<uint8_t>(rect.y + 1)[rect.x],
-            rb = src.ptr<uint8_t>(rect.y + 1)[rect.x + 1];
-
-    double v1 = lt + (rt-lt)*(dst.x-rect.x);
-    double v2 = lb + (rb-lb)*(dst.x-rect.x);
-    return v1 + (v2-v1)*(dst.y-rect.y);
-}
-
-class LocalPixels{
+//Local Pixels Sample
+class LPS{
     const int R, P;
     double* RX;
     double* RY;
@@ -44,7 +50,7 @@ class LocalPixels{
         return (rp/10 + 1) * 8;
     }
 public:
-	LocalPixels(LOCAL_SAMPLE_SHAPE shape_, LOCAL_SAMPLE_RP rp_): R(setR(rp_)), P(setP(rp_)){
+	LPS(LOCAL_SAMPLE_SHAPE shape_, LOCAL_SAMPLE_RP rp_): R(setR(rp_)), P(setP(rp_)){
         RX = new double[P];
         RY = new double[P];
         const double PI = 3.14159;
@@ -63,7 +69,16 @@ public:
             // }waiting for realizing
         }
     }
-    ~LocalPixels(){
+    LPS(const LPS& lp): R(lp.R), P(lp.P){
+        RX = new double[P];
+        RY = new double[P];
+        for (size_t i = 0; i < P; i++)
+        {
+            RX[i] = lp.RX[i];
+            RY[i] = lp.RY[i];
+        }//or memcpy
+    }
+    ~LPS(){
         delete [] RX;
         delete [] RY;
     }
@@ -81,76 +96,39 @@ public:
     }
 };
 
-class LBP : public Operator{
+
+class LBP : public Operator {
 protected:
-    const LocalPixels lp;
-    int* table;
+    const LPS lps;
+    bool flag = false;
 public:
-	LBP(LOCAL_SAMPLE_SHAPE shape_, LOCAL_SAMPLE_RP rp_):lp(shape_, rp_){
-        table = new int[getPN()];
-        for (size_t i = 0; i < getPN(); i++){
-            table[i] = i;
-        };
-    }
-	~LBP(){
-        delete[] table;
-    };
+    LBP(const LPS& lps_, TFDR* tfdr_ = nullptr);
+	virtual ~LBP();
 	virtual void process(const Mat& src, Mat& dst);
-	virtual int getPN() const{
-        return pow(2, lp.getP());
-    }
+	virtual int getPN() const;
 };
 
-class LBPRI : public LBP{
+// class LBP_Exp0 : public LBP{
+// public:
+// 	LBP_Exp0(LOCAL_SAMPLE_SHAPE shape_, LOCAL_SAMPLE_RP rp_):LBP(shape_, rp_){}
+//     virtual ~LBP_Exp0(){};
+//     virtual void process(const Mat& src, Mat& dst);
+// };
+
+class LBPMR : public LBP{
 public:
-	LBPRI(LOCAL_SAMPLE_SHAPE shape_, LOCAL_SAMPLE_RP rp_):LBP(shape_, rp_){
-        int p = pow(2, lp.getP());
-        for (size_t i = 0; i < p; i++){
-            table[i] = 0;//waiting to be realized
-        }
-    }
-	~LBPRI(){};
-	virtual int getPN() const{
-        if(lp.getP() == 8){
-            return 36;
-        }else{
-            return 0;//waiting to be realized
-        }
-    }
+	LBPMR(const LPS& lp_, TFDR* tfdr_ = nullptr): LBP(lp_, tfdr_){};
+    virtual ~LBPMR(){}
+	virtual void process(const Mat& src, Mat& dst);
 };
 
-class LBPRIU2 : public LBP{
+class GNP : public Operator{
+int N;
 public:
-	LBPRIU2(LOCAL_SAMPLE_SHAPE shape_, LOCAL_SAMPLE_RP rp_):LBP(shape_, rp_){
-        int p = pow(2, lp.getP());
-        for (size_t i = 0; i < p; i++){
-            table[i] = calUniform(i, lp.getP());
-        };
-    }
-	~LBPRIU2(){};
-	virtual int getPN() const{
-        return lp.getP()+2;
-    }
-    int calUniform(int t, int enob) const{
-		int lowestBit = t & 1;
-		int t_ = t >> 1 | (lowestBit << (enob - 1));
-		int u2 = 0;
-		for(uint8_t i=0; i < enob; i++){
-			int tmp = 1 << i;
-			u2 += ((t&tmp)!=(t_&tmp));
-		}
-		int out = 0;
-		if(u2 > 2){
-			out = enob + 1;
-		}else{
-			for (size_t i = 0; i < enob; i++)
-			{
-				if(t & (1 <<i))
-					out += 1;
-			}
-		}
-		return out;
-	}
+    GNP(int N_);
+    virtual ~GNP();
+    virtual void process(const Mat& src, Mat& dst);
+    virtual int getPN() const {return N;}
 };
 
 

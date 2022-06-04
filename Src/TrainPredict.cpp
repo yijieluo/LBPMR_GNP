@@ -8,7 +8,7 @@ uint8_t svmTraining(const cv::Mat & featureMat, const cv::Mat & labelMat)
 
 	svm->setType(SVM::C_SVC);
 	svm->setKernel(SVM::RBF);
-	svm->setGamma(0.01);//0.01
+	svm->setGamma(0.01);//0.001 for kt2b , 0.01 for other datasets
 	svm->setC(1000);
 	svm->setTermCriteria(cv::TermCriteria(cv::TermCriteria::EPS, 1000, FLT_EPSILON));
 	svm->train(TrainData::create(featureMat, ROW_SAMPLE, labelMat));
